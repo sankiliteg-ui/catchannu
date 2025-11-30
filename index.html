@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Catch Annu Game</title>
+    <style>
+        /* --- CSS STYLING --- */
+        :root {
+            --primary-glow: #ff69b4; /* Hot Pink */
+            --gold: #ffd700;
+            --bg-dark: #0a0a2a; 
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-dark);
+            /* Magical purple/black gradient */
+            background-image: linear-gradient(to bottom, #000000, #2c003e, #000000);
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; 
+        }
+
+        /* UI Header */
+        #ui-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 15px;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+            color: white;
+            pointer-events: none;
+        }
+
+        /* Top Corner DP styling */
+        .top-dp {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 0 15px var(--primary-glow);
+            object-fit: cover;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 15px var(--primary-glow); }
+            50% { box-shadow: 0 0 30px var(--primary-glow), 0 0 10px white; }
+            100% { box-shadow: 0 0 15px var(--primary-glow); }
+        }
+
+        .score-board {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 0 5px var(--primary-glow);
+        }
+
+        #gameCanvas {
+            display: block;
+        }
+
+        /* Start Screen */
+        #start-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            z-index: 20;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 25px;
+            border: 1px solid rgba(255,255,255,0.3);
+            box-shadow: 0 0 50px rgba(255, 105, 180, 0.5);
+            width: 85%;
+            max-width: 350px;
+        }
+
+        h1 {
+            font-size: 2em;
+            margin: 0 0 10px 0;
+            color: var(--gold);
+            text-shadow: 0 0 10px #ff0000;
+        }
+
+        p {
+            font-size: 1.1em;
+            margin-bottom: 30px;
+            color: #ffccff;
+        }
+
+        button {
+            background: linear-gradient(90deg, #ff1493, #ff8c00);
+            border: none;
+            padding: 15px 50px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            transition: transform 0.2s;
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+
+    <audio id="sndCatch" src="catch.mp3" preload="auto"></audio>
+    <audio id="sndBg" src="bgmusic.mp3" loop preload="auto"></audio>
+
+    <img id="sourceImg" src="ann.jpg" style="display:none;" alt="hidden source">
+
+    <div id="ui-header">
+        <div class="score-board">Love: <span id="score">0</span> ❤️</div>
+        <img src="ann.jpg" alt="Annu" class="top-dp">
+    </div>
+
+    <div id="start-screen">
+        <h1>Catch Annu ❤️</h1>
+        <p>Catch the falling photos to collect love!</p>
+        <button id="startBtn">Start</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+
+    <script>
+        /* --- JAVASCRIPT LOGIC --- */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('startBtn');
+        const sourceImg = document.getElementById('sourceImg'); // The DP image
+        const sndCatch = document.getElementById('sndCatch');
+        const sndBg = document.getElementById('sndBg');
+
+        let score = 0;
+        let gameRunning = false;
+
+        // Compliments that float up
+        const compliments = [
+            "Beautiful ❤️", "Cutie 🥰", "Annu ✨", 
+            "Smile 😊", "Perfect 🌹", "Angel 👼", 
+            "Lovely 💖", "Wow 🌟", "Queen 👑"
+        ];
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- Game Objects ---
+
+        // The Paddle
+        const player = {
+            x: canvas.width / 2 - 50,
+            y: canvas.height - 90,
+            width: 100,
+            height: 20,
+            color: '#ff1493', 
+            draw: function() {
+                ctx.beginPath();
+                ctx.roundRect(this.x, this.y, this.width, this.height, 10);
+                ctx.fillStyle = this.color;
+                // Glowing effect
+                ctx.shadowBlur = 25;
+                ctx.shadowColor = '#ffd700'; // Gold glow
+                ctx.fill();
+                ctx.closePath();
+                ctx.shadowBlur = 0; 
+            }
+        };
+
+        // Falling Photo Item
+        let items = [];
+        class FallingItem {
+            constructor() {
+                this.radius = 30; // Size of the photo bubble
+                this.x = Math.random() * (canvas.width - this.radius * 2) + this.radius;
+                this.y = -50;
+                this.speed = Math.random() * 2 + 2; // Falling speed
+                this.angle = 0;
+            }
+
+            draw() {
+                // 1. Draw The Circle Clipping Mask
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.closePath();
+                
+                // Add a white border glow around the photo
+                ctx.shadowColor = 'white';
+                ctx.shadowBlur = 15;
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = '#fff';
+                ctx.stroke();
+                
+                // Clip so image is round
+                ctx.clip(); 
+                
+                // Draw the Annu Image inside
+                // If image loaded, draw it. If not, draw pink circle.
+                if (sourceImg.complete && sourceImg.naturalHeight !== 0) {
+                    ctx.drawImage(sourceImg, this.x - this.radius, this.y - this.radius, this.radius * 2, this.radius * 2);
+                } else {
+                    ctx.fillStyle = 'pink';
+                    ctx.fill();
+                }
+                ctx.restore();
+
+                // 2. Draw the Name "Annu" below the photo
+                ctx.font = "bold 16px Arial";
+                ctx.fillStyle = "#ffd700"; // Gold Text
+                ctx.textAlign = "center";
+                ctx.shadowColor = "black";
+                ctx.shadowBlur = 4;
+                ctx.fillText("Annu", this.x, this.y + this.radius + 20);
+                ctx.shadowBlur = 0;
+            }
+
+            update() {
+                this.y += this.speed;
+            }
+        }
+
+        // Floating Compliment Text
+        let floats = [];
+        class FloatingText {
+            constructor(x, y, text) {
+                this.x = x;
+                this.y = y;
+                this.text = text;
+                this.life = 1.0;
+                this.dy = -2;
+                this.color = `hsl(${Math.random() * 60 + 300}, 100%, 75%)`; // Pinks and Purples
+            }
+            update() {
+                this.y += this.dy;
+                this.life -= 0.02;
+            }
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.life;
+                ctx.font = "bold 22px Arial";
+                ctx.fillStyle = this.color;
+                ctx.textAlign = "center";
+                ctx.shadowColor = "white";
+                ctx.shadowBlur = 5;
+                ctx.fillText(this.text, this.x, this.y);
+                ctx.restore();
+            }
+        }
+
+        // Background Particles (Hearts/Stars)
+        let particles = [];
+        function createBgParticles() {
+            particles = [];
+            for(let i = 0; i < 30; i++) {
+                particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    size: Math.random() * 3,
+                    opacity: Math.random()
+                });
+            }
+        }
+
+        // --- Mechanics ---
+
+        function spawnItem() {
+            if (Math.random() < 0.02) { 
+                items.push(new FallingItem());
+            }
+        }
+
+        function playSound(sound) {
+            if (sound.readyState >= 2) {
+                sound.currentTime = 0;
+                sound.play().catch(() => {});
+            }
+        }
+
+        function animate() {
+            if (!gameRunning) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Background Stars
+            ctx.fillStyle = 'white';
+            particles.forEach(p => {
+                ctx.globalAlpha = p.opacity;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                ctx.fill();
+                p.y += 0.5;
+                if(p.y > canvas.height) p.y = 0;
+            });
+            ctx.globalAlpha = 1;
+
+            player.draw();
+            spawnItem();
+
+            // Handle Falling Items
+            items.forEach((item, index) => {
+                item.update();
+                item.draw();
+
+                // Collision
+                if (
+                    item.y + item.radius >= player.y &&
+                    item.x >= player.x &&
+                    item.x <= player.x + player.width
+                ) {
+                    // CAUGHT!
+                    items.splice(index, 1);
+                    score += 10;
+                    scoreEl.innerText = score;
+                    playSound(sndCatch);
+
+                    // Add floating text
+                    let txt = compliments[Math.floor(Math.random() * compliments.length)];
+                    floats.push(new FloatingText(player.x + player.width/2, player.y, txt));
+                }
+                // Missed
+                else if (item.y - item.radius > canvas.height) {
+                     items.splice(index, 1);
+                }
+            });
+
+            // Handle Floating Text
+            floats.forEach((f, i) => {
+                f.update();
+                f.draw();
+                if(f.life <= 0) floats.splice(i, 1);
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        // --- Controls ---
+        function movePlayer(clientX) {
+            let newX = clientX - (player.width / 2);
+            if (newX < 0) newX = 0;
+            if (newX + player.width > canvas.width) newX = canvas.width - player.width;
+            player.x = newX;
+        }
+
+        canvas.addEventListener('touchmove', (e) => { e.preventDefault(); movePlayer(e.touches[0].clientX); }, { passive: false });
+        canvas.addEventListener('touchstart', (e) => { movePlayer(e.touches[0].clientX); });
+        canvas.addEventListener('mousemove', (e) => { movePlayer(e.clientX); });
+
+        // --- Init ---
+        startBtn.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            gameRunning = true;
+            score = 0;
+            createBgParticles();
+            playSound(sndBg); 
+            animate();
+        });
+
+    </script>
+</body>
+</html>
